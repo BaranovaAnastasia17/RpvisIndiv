@@ -1,0 +1,152 @@
+
+DROP SEQUENCE IF EXISTS client_client_id_seq CASCADE;
+DROP SEQUENCE IF EXISTS product_product_id_seq CASCADE;
+DROP SEQUENCE IF EXISTS orders_order_id_seq CASCADE;
+DROP SEQUENCE IF EXISTS orderinfo_orderinfo_id_seq CASCADE;
+
+
+CREATE SEQUENCE client_client_id_seq;
+CREATE SEQUENCE product_product_id_seq;
+CREATE SEQUENCE orders_order_id_seq;
+CREATE SEQUENCE orderinfo_orderinfo_id_seq;
+
+CREATE TABLE IF NOT EXISTS public.client
+(
+    client_id integer NOT NULL DEFAULT nextval('client_client_id_seq'),
+    client_name text NOT NULL,
+    client_address text NOT NULL,
+    client_phone text,
+    CONSTRAINT client_pkey PRIMARY KEY (client_id)
+);
+
+-- Create table: public.product
+CREATE TABLE IF NOT EXISTS public.product
+(
+    product_id integer NOT NULL DEFAULT nextval('product_product_id_seq'),
+    product_name text NOT NULL,
+    product_price integer NOT NULL,
+    CONSTRAINT product_pkey PRIMARY KEY (product_id)
+);
+
+-- Create table: public.orders
+CREATE TABLE IF NOT EXISTS public.orders
+(
+    order_id integer NOT NULL DEFAULT nextval('orders_order_id_seq'),
+    order_date date NOT NULL,
+    client_id integer NOT NULL,
+    total_amount integer NOT NULL,
+    CONSTRAINT orders_pkey PRIMARY KEY (order_id),
+    CONSTRAINT orders_client_id_fkey FOREIGN KEY (client_id)
+        REFERENCES public.client (client_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+);
+
+CREATE TABLE IF NOT EXISTS public.orderinfo
+(
+    orderinfo_id integer NOT NULL DEFAULT nextval('orderinfo_orderinfo_id_seq'),
+    order_id integer NOT NULL,
+    product_id integer NOT NULL,
+    quantity integer NOT NULL,
+    delivered boolean NOT NULL DEFAULT false, -- Boolean flag for delivery status
+    CONSTRAINT orderinfo_pkey PRIMARY KEY (orderinfo_id),
+    CONSTRAINT orderinfo_order_id_fkey FOREIGN KEY (order_id)
+        REFERENCES public.orders (order_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE,
+    CONSTRAINT orderinfo_product_id_fkey FOREIGN KEY (product_id)
+        REFERENCES public.product (product_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+);
+INSERT INTO public.client (client_id, client_name, client_address, client_phone)
+VALUES 
+(1, 'Алексей', 'ул. Ленина, 12, Москва', '4951234567'),
+(2, 'Ирина', 'ул. Садовая, 30, Санкт-Петербург', '8123456789'),
+(3, 'Олег', 'пр. Мира, 45, Новосибирск', '3831234567'),
+(4, 'Мария', 'ул. Большая, 92, Екатеринбург', '3439876543'),
+(5, 'Анатолий', 'ул. Солнечная, 7, Казань', '8431234567'),
+(6, 'Светлана', 'пр. Ленина, 64, Нижний Новгород', '8317654321'),
+(7, 'Игорь', 'ул. Заречная, 18, Челябинск', '3511234567'),
+(8, 'Татьяна', 'пр. Победы, 56, Омск', '3812234567'),
+(9, 'Наталья', 'ул. Луговая, 33, Самара', '8461234567'),
+(10, 'Владимир', 'пр. Космонавтов, 90, Ростов-на-Дону', '8631234567');
+
+INSERT INTO public.product (product_id, product_name, product_price)
+VALUES 
+(1, 'Холодильник', 45000),
+(2, 'Телевизор', 30000),
+(3, 'Микроволновка', 8000),
+(4, 'Чайник электрический', 2500),
+(5, 'Пылесос', 15000),
+(6, 'Стиральная машина', 35000),
+(7, 'Утюг', 4500),
+(8, 'Миксер', 3200),
+(9, 'Фен', 2900),
+(10, 'Кофеварка', 5500);
+
+INSERT INTO public.orders (order_id, order_date, client_id, total_amount)
+VALUES 
+(1, '2024-01-10', 1, 79000),
+(2, '2024-02-15', 2, 33000),
+(3, '2024-03-20', 3, 8000),
+(4, '2024-04-25', 4, 4000),
+(5, '2024-05-30', 5, 15000),
+(6, '2024-06-15', 6, 70000),
+(7, '2024-07-22', 7, 8000),
+(8, '2024-08-28', 8, 6200),
+(9, '2024-09-15', 9, 3400),
+(10, '2024-10-23', 10, 9000);
+
+-- Inserting sample data into public.orderinfo
+INSERT INTO public.orderinfo ( order_id, product_id, quantity, delivered)
+VALUES 
+(1, 1, 1, false),
+(2, 2, 1, true),
+(3, 3, 1, false),
+(4, 4, 1, true),
+(5, 5, 1, false),
+(6, 6, 1, true),
+(7, 7, 1, false),
+(8, 8, 1, true),
+(9, 9, 1, false),
+(10, 10, 1, true);
+
+CREATE OR REPLACE FUNCTION update_total_amount()
+RETURNS TRIGGER AS $$
+BEGIN
+  
+    IF TG_OP = 'INSERT' OR TG_OP = 'UPDATE' THEN
+        UPDATE public.orders
+        SET total_amount = (
+            SELECT SUM(product_price * quantity)
+            FROM public.orderinfo
+            JOIN public.product ON public.orderinfo.product_id = public.product.product_id
+            WHERE public.orderinfo.order_id = NEW.order_id
+        )
+        WHERE order_id = NEW.order_id;
+    ELSIF TG_OP = 'DELETE' THEN
+        UPDATE public.orders
+        SET total_amount = (
+            SELECT COALESCE(SUM(product_price * quantity), 0) -- Use COALESCE to handle null values
+            FROM public.orderinfo
+            JOIN public.product ON public.orderinfo.product_id = public.product.product_id
+            WHERE public.orderinfo.order_id = OLD.order_id
+        )
+        WHERE order_id = OLD.order_id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_orderinfo_update_after
+AFTER INSERT OR UPDATE ON public.orderinfo
+FOR EACH ROW
+EXECUTE FUNCTION update_total_amount();
+
+CREATE TRIGGER trg_orderinfo_delete_after
+AFTER DELETE ON public.orderinfo
+FOR EACH ROW
+EXECUTE FUNCTION update_total_amount();
+ALTER TABLE OrderInfo ADD COLUMN payment_50_received BOOLEAN DEFAULT FALSE; 
+UPDATE OrderInfo SET payment_50_received = FALSE;
